@@ -11,9 +11,10 @@ struct MessageComposerView: View {
     let onSend: () -> Void
     let onStop: () -> Void
 
-    @FocusState private var isEditorFocused: Bool
+    @State private var shouldFocusEditor = false
     @State private var isDropTargeted = false
     @State private var showingFileImporter = false
+    @State private var attachmentFeedbackMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -25,12 +26,19 @@ struct MessageComposerView: View {
             }
 
             ZStack(alignment: .topLeading) {
-                TextEditor(text: $draftText)
-                    .font(.body)
-                    .focused($isEditorFocused)
+                ComposerTextView(
+                    text: $draftText,
+                    shouldFocus: $shouldFocusEditor,
+                    onPasteImages: { attachments in
+                        guard !attachments.isEmpty else {
+                            return
+                        }
+
+                        onAppendImages(attachments)
+                        showAttachmentFeedback(for: attachments.count, action: "Pasted")
+                    }
+                )
                     .frame(minHeight: 100, maxHeight: 180)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
                     .background(editorBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .overlay {
@@ -53,12 +61,16 @@ struct MessageComposerView: View {
                 }
 
                 onAppendImages(attachments)
+                showAttachmentFeedback(for: attachments.count, action: "Pasted")
             }
             .onDrop(of: dropTypes, isTargeted: $isDropTargeted) { providers in
                 Task {
                     let attachments = await ImageAttachmentSupport.loadAttachments(from: providers)
                     await MainActor.run {
                         onAppendImages(attachments)
+                        if !attachments.isEmpty {
+                            showAttachmentFeedback(for: attachments.count, action: "Added")
+                        }
                     }
                 }
                 return true
@@ -68,6 +80,9 @@ struct MessageComposerView: View {
                 Button {
                     let attachments = ImageAttachmentSupport.attachmentsFromPasteboard()
                     onAppendImages(attachments)
+                    if !attachments.isEmpty {
+                        showAttachmentFeedback(for: attachments.count, action: "Pasted")
+                    }
                 } label: {
                     Label("Paste Image", systemImage: "photo.on.rectangle")
                 }
@@ -95,6 +110,13 @@ struct MessageComposerView: View {
                     .keyboardShortcut(.return, modifiers: [.command])
                     .disabled(isGenerating || sendDisabled)
             }
+
+            if let attachmentFeedbackMessage {
+                Text(attachmentFeedbackMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(20)
         .background(.regularMaterial)
@@ -109,6 +131,9 @@ struct MessageComposerView: View {
 
             let attachments = urls.compactMap(ImageAttachmentSupport.loadAttachment(from:))
             onAppendImages(attachments)
+            if !attachments.isEmpty {
+                showAttachmentFeedback(for: attachments.count, action: "Added")
+            }
         }
         .onAppear {
             requestEditorFocus()
@@ -142,8 +167,173 @@ struct MessageComposerView: View {
 
     private func requestEditorFocus() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            isEditorFocused = true
+            shouldFocusEditor = true
         }
+    }
+
+    private func showAttachmentFeedback(for count: Int, action: String) {
+        let noun = count == 1 ? "image" : "images"
+        withAnimation(.easeOut(duration: 0.16)) {
+            attachmentFeedbackMessage = "\(action) \(count) \(noun)"
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                attachmentFeedbackMessage = nil
+            }
+        }
+    }
+}
+
+private struct ComposerTextView: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var shouldFocus: Bool
+    let onPasteImages: ([ChatImageAttachment]) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+
+        let textView = PasteAwareTextView()
+        textView.delegate = context.coordinator
+        textView.string = text
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.isAutomaticQuoteSubstitutionEnabled = true
+        textView.isAutomaticDashSubstitutionEnabled = true
+        textView.font = NSFont.preferredFont(forTextStyle: .body)
+        textView.backgroundColor = .clear
+        textView.textContainerInset = NSSize(width: 8, height: 10)
+        textView.onPasteImages = onPasteImages
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? PasteAwareTextView else {
+            return
+        }
+
+        if textView.string != text {
+            textView.string = text
+        }
+
+        textView.onPasteImages = onPasteImages
+
+        if shouldFocus, nsView.window?.firstResponder !== textView {
+            nsView.window?.makeFirstResponder(textView)
+            DispatchQueue.main.async {
+                shouldFocus = false
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        @Binding var text: String
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else {
+                return
+            }
+
+            text = textView.string
+        }
+    }
+}
+
+private final class PasteAwareTextView: NSTextView {
+    var onPasteImages: (([ChatImageAttachment]) -> Void)?
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + supportedImagePasteboardTypes
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let isCommandV = event.type == .keyDown
+            && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+            && event.charactersIgnoringModifiers?.lowercased() == "v"
+
+        if isCommandV, consumePasteboardImages() {
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func paste(_ sender: Any?) {
+        if consumePasteboardImages() {
+            return
+        }
+
+        super.paste(sender)
+    }
+
+    override func pasteAsPlainText(_ sender: Any?) {
+        if consumePasteboardImages() {
+            return
+        }
+
+        super.pasteAsPlainText(sender)
+    }
+
+    override func pasteAsRichText(_ sender: Any?) {
+        if consumePasteboardImages() {
+            return
+        }
+
+        super.pasteAsRichText(sender)
+    }
+
+    override func readSelection(from pboard: NSPasteboard) -> Bool {
+        if consumePasteboardImages(from: pboard) {
+            return true
+        }
+
+        return super.readSelection(from: pboard)
+    }
+
+    override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        if supportedImagePasteboardTypes.contains(type), consumePasteboardImages(from: pboard) {
+            return true
+        }
+
+        return super.readSelection(from: pboard, type: type)
+    }
+
+    private var supportedImagePasteboardTypes: [NSPasteboard.PasteboardType] {
+        [
+            NSPasteboard.PasteboardType(UTType.png.identifier),
+            NSPasteboard.PasteboardType(UTType.jpeg.identifier),
+            NSPasteboard.PasteboardType(UTType.tiff.identifier),
+            NSPasteboard.PasteboardType(UTType.gif.identifier),
+            NSPasteboard.PasteboardType(UTType.webP.identifier),
+            .fileURL
+        ]
+    }
+
+    private func consumePasteboardImages(from pasteboard: NSPasteboard = .general) -> Bool {
+        let attachments = ImageAttachmentSupport.attachments(from: pasteboard)
+        guard !attachments.isEmpty else {
+            return false
+        }
+
+        onPasteImages?(attachments)
+        return true
     }
 }
 

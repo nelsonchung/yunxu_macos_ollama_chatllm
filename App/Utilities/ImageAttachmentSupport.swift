@@ -4,8 +4,10 @@ import UniformTypeIdentifiers
 
 enum ImageAttachmentSupport {
     static func attachmentsFromPasteboard() -> [ChatImageAttachment] {
-        let pasteboard = NSPasteboard.general
+        attachments(from: .general)
+    }
 
+    static func attachments(from pasteboard: NSPasteboard) -> [ChatImageAttachment] {
         if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] {
             return images.compactMap { image in
                 makeAttachment(from: image, filename: nil)
