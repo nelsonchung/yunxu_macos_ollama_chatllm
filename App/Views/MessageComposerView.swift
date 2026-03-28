@@ -5,12 +5,14 @@ struct MessageComposerView: View {
     let isGenerating: Bool
     let onSend: () -> Void
     let onStop: () -> Void
+    @FocusState private var isEditorFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $draftText)
                     .font(.body)
+                    .focused($isEditorFocused)
                     .frame(minHeight: 100, maxHeight: 180)
                     .scrollContentBackground(.hidden)
                     .padding(8)
@@ -45,5 +47,19 @@ struct MessageComposerView: View {
         }
         .padding(20)
         .background(.regularMaterial)
+        .onAppear {
+            requestEditorFocus()
+        }
+        .onChange(of: isGenerating) { _, newValue in
+            if !newValue {
+                requestEditorFocus()
+            }
+        }
+    }
+
+    private func requestEditorFocus() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            isEditorFocused = true
+        }
     }
 }

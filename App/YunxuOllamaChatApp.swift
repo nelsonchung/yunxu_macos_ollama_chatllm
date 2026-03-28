@@ -1,7 +1,22 @@
+import AppKit
 import SwiftUI
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+
+        // Swift Package GUI apps launched from Terminal may show a window
+        // without immediately becoming the active foreground app.
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        }
+    }
+}
 
 @main
 struct YunxuOllamaChatApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var settingsViewModel: SettingsViewModel
     @StateObject private var conversationListViewModel: ConversationListViewModel
     @StateObject private var chatViewModel: ChatViewModel
