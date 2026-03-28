@@ -254,9 +254,18 @@ private struct MessageBubbleView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        if let responseModeLabel {
+                            ResponseModeBadge(
+                                text: responseModeLabel,
+                                tone: responseModeTone
+                            )
+                        }
+                    }
 
                     MessageTimingView(message: message)
                 }
@@ -352,6 +361,31 @@ private struct MessageBubbleView: View {
         case .system:
             return Color.gray.opacity(0.12)
         }
+    }
+
+    private var responseModeLabel: String? {
+        guard message.role == .assistant else {
+            return nil
+        }
+
+        if thinkingContent != nil {
+            return "Thinking trace detected"
+        }
+
+        if message.status == .streaming {
+            return nil
+        }
+
+        let trimmedAnswer = answerContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAnswer.isEmpty else {
+            return nil
+        }
+
+        return "Direct answer only"
+    }
+
+    private var responseModeTone: ResponseModeBadge.Tone {
+        thinkingContent != nil ? .thinking : .direct
     }
 }
 
@@ -566,6 +600,44 @@ private struct ThoughtSectionView: View {
         .padding(12)
         .background(Color.orange.opacity(0.09))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct ResponseModeBadge: View {
+    enum Tone {
+        case thinking
+        case direct
+    }
+
+    let text: String
+    let tone: Tone
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(backgroundColor)
+            .clipShape(Capsule())
+    }
+
+    private var foregroundColor: Color {
+        switch tone {
+        case .thinking:
+            return Color.orange.opacity(0.95)
+        case .direct:
+            return .secondary
+        }
+    }
+
+    private var backgroundColor: Color {
+        switch tone {
+        case .thinking:
+            return Color.orange.opacity(0.12)
+        case .direct:
+            return Color.primary.opacity(0.06)
+        }
     }
 }
 
