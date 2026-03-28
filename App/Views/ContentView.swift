@@ -17,6 +17,7 @@ struct ContentView: View {
             ChatDetailView(
                 conversation: conversationListViewModel.selectedConversation,
                 draftText: $chatViewModel.draftText,
+                draftImages: $chatViewModel.draftImages,
                 isGenerating: chatViewModel.isGenerating,
                 errorMessage: combinedErrorMessage,
                 connectionStatus: settingsViewModel.connectionStatus,
@@ -42,7 +43,9 @@ struct ContentView: View {
                     Task {
                         await settingsViewModel.unloadSelectedModel()
                     }
-                }
+                },
+                onAppendImages: chatViewModel.appendDraftImages,
+                onRemoveDraftImage: chatViewModel.removeDraftImage
             )
         }
         .navigationSplitViewStyle(.balanced)

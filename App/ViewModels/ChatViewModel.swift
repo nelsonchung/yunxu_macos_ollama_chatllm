@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class ChatViewModel: ObservableObject {
     @Published var draftText = ""
+    @Published var draftImages: [ChatImageAttachment] = []
     @Published var isGenerating = false
     @Published var errorMessage: String?
 
@@ -40,7 +41,7 @@ final class ChatViewModel: ObservableObject {
 
     func sendMessage() {
         let trimmedText = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else {
+        guard !trimmedText.isEmpty || !draftImages.isEmpty else {
             return
         }
 
@@ -59,7 +60,8 @@ final class ChatViewModel: ObservableObject {
         }
 
         errorMessage = nil
-        let userMessage = ChatMessage(role: .user, content: trimmedText)
+        let pendingImages = draftImages
+        let userMessage = ChatMessage(role: .user, content: trimmedText, images: pendingImages)
         let assistantMessage = ChatMessage(role: .assistant, content: "", status: .streaming)
 
         var updatedConversation = conversation
@@ -69,11 +71,12 @@ final class ChatViewModel: ObservableObject {
         updatedConversation.updatedAt = .now
 
         if updatedConversation.title == "New Chat" {
-            updatedConversation.title = makeConversationTitle(from: trimmedText)
+            updatedConversation.title = makeConversationTitle(from: trimmedText, imageCount: pendingImages.count)
         }
 
         conversationsViewModel.updateConversation(updatedConversation)
         draftText = ""
+        draftImages = []
         isGenerating = true
         Task {
             await settingsViewModel.refreshRunningModels()
@@ -259,29 +262,43 @@ final class ChatViewModel: ObservableObject {
         let visibleMessages = conversation.messages
             .filter {
                 let answer = $0.resolvedDisplay.answer.trimmingCharacters(in: .whitespacesAndNewlines)
-                return !answer.isEmpty
+                return !answer.isEmpty || !$0.images.isEmpty
             }
             .suffix(20)
 
         var requestMessages: [OllamaChatRequestMessage] = []
         let systemPrompt = effectiveSystemPrompt()
         if !systemPrompt.isEmpty {
-            requestMessages.append(OllamaChatRequestMessage(role: ChatRole.system.rawValue, content: systemPrompt))
+            requestMessages.append(
+                OllamaChatRequestMessage(
+                    role: ChatRole.system.rawValue,
+                    content: systemPrompt,
+                    images: nil
+                )
+            )
         }
 
         requestMessages.append(
             contentsOf: visibleMessages.map {
-                OllamaChatRequestMessage(role: $0.role.rawValue, content: $0.resolvedDisplay.answer)
+                OllamaChatRequestMessage(
+                    role: $0.role.rawValue,
+                    content: $0.resolvedDisplay.answer,
+                    images: $0.images.isEmpty ? nil : $0.images.map(\.base64String)
+                )
             }
         )
 
         return requestMessages
     }
 
-    private func makeConversationTitle(from text: String) -> String {
+    private func makeConversationTitle(from text: String, imageCount: Int) -> String {
         let sanitized = text
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if sanitized.isEmpty, imageCount > 0 {
+            return imageCount == 1 ? "Image Prompt" : "\(imageCount) Images"
+        }
 
         if sanitized.count <= 36 {
             return sanitized
@@ -357,6 +374,18 @@ final class ChatViewModel: ObservableObject {
 
         tokenCount += Int(ceil(Double(asciiLikeScalarCount) / 4.0))
         return max(tokenCount, 1)
+    }
+
+    func appendDraftImages(_ attachments: [ChatImageAttachment]) {
+        guard !attachments.isEmpty else {
+            return
+        }
+
+        draftImages.append(contentsOf: attachments)
+    }
+
+    func removeDraftImage(id: UUID) {
+        draftImages.removeAll { $0.id == id }
     }
 }
 

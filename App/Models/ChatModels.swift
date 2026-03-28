@@ -18,6 +18,7 @@ struct ChatMessage: Identifiable, Codable, Equatable {
     var role: ChatRole
     var content: String
     var thinking: String?
+    var images: [ChatImageAttachment]
     var createdAt: Date
     var completedAt: Date?
     var status: ChatMessageStatus
@@ -27,6 +28,7 @@ struct ChatMessage: Identifiable, Codable, Equatable {
         role: ChatRole,
         content: String,
         thinking: String? = nil,
+        images: [ChatImageAttachment] = [],
         createdAt: Date = .now,
         completedAt: Date? = nil,
         status: ChatMessageStatus = .complete
@@ -35,6 +37,7 @@ struct ChatMessage: Identifiable, Codable, Equatable {
         self.role = role
         self.content = content
         self.thinking = thinking
+        self.images = images
         self.createdAt = createdAt
         self.completedAt = completedAt
         self.status = status
@@ -82,6 +85,29 @@ struct ConversationIndexEntry: Codable {
     var id: UUID
     var title: String
     var updatedAt: Date
+}
+
+struct ChatImageAttachment: Identifiable, Codable, Equatable {
+    var id: UUID
+    var data: Data
+    var mimeType: String
+    var filename: String?
+
+    init(
+        id: UUID = UUID(),
+        data: Data,
+        mimeType: String = "image/png",
+        filename: String? = nil
+    ) {
+        self.id = id
+        self.data = data
+        self.mimeType = mimeType
+        self.filename = filename
+    }
+
+    var base64String: String {
+        data.base64EncodedString()
+    }
 }
 
 enum OllamaConnectionStatus: Equatable {

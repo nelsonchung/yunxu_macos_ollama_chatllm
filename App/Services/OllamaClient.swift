@@ -184,6 +184,7 @@ actor OllamaClient {
 struct OllamaChatRequestMessage: Codable, Equatable {
     let role: String
     let content: String
+    let images: [String]?
 }
 
 private struct OllamaTagsResponse: Decodable {

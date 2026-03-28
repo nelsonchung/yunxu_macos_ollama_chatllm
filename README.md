@@ -10,6 +10,7 @@ The app currently implements:
 - Running-model status via `/api/ps`
 - Streaming chat via `/api/chat`
 - Reasoning/thinking trace rendering for Qwen3 when Quick Response Mode is off
+- Image input for multimodal models via paste, drag-and-drop, and file picker
 - Multi-conversation sidebar
 - Local conversation persistence in Application Support
 - Settings for base URL, model, system prompt, temperature, and context size

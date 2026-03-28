@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatDetailView: View {
     let conversation: ChatConversation?
     @Binding var draftText: String
+    @Binding var draftImages: [ChatImageAttachment]
     let isGenerating: Bool
     let errorMessage: String?
     let connectionStatus: OllamaConnectionStatus
@@ -17,6 +18,8 @@ struct ChatDetailView: View {
     let onRefreshRuntimeStatus: () -> Void
     let onPrewarmModel: () -> Void
     let onUnloadModel: () -> Void
+    let onAppendImages: ([ChatImageAttachment]) -> Void
+    let onRemoveDraftImage: (UUID) -> Void
     @State private var showsRuntimeDetails = false
 
     var body: some View {
@@ -29,7 +32,10 @@ struct ChatDetailView: View {
                     Divider()
                     MessageComposerView(
                         draftText: $draftText,
+                        draftImages: $draftImages,
                         isGenerating: isGenerating,
+                        onAppendImages: onAppendImages,
+                        onRemoveImage: onRemoveDraftImage,
                         onSend: onSend,
                         onStop: onStop
                     )
@@ -310,6 +316,10 @@ private struct MessageBubbleView: View {
                     content: thinkingContent,
                     isStreaming: message.status == .streaming && answerContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 )
+            }
+
+            if !message.images.isEmpty {
+                AttachmentGalleryView(images: message.images)
             }
 
             if !displayContent.isEmpty {
@@ -658,6 +668,28 @@ private struct ResponseModeBadge: View {
             return Color.orange.opacity(0.12)
         case .direct:
             return Color.primary.opacity(0.06)
+        }
+    }
+}
+
+private struct AttachmentGalleryView: View {
+    let images: [ChatImageAttachment]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(images) { image in
+                if let nsImage = NSImage(data: image.data) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 360, maxHeight: 260)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(Color.primary.opacity(0.08))
+                        }
+                }
+            }
         }
     }
 }
