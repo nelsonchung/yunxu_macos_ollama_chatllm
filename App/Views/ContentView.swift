@@ -21,6 +21,8 @@ struct ContentView: View {
                 errorMessage: combinedErrorMessage,
                 connectionStatus: settingsViewModel.connectionStatus,
                 runningModels: settingsViewModel.runningModels,
+                runtimeStatusMessage: settingsViewModel.runtimeStatusMessage,
+                runtimeActionInFlight: settingsViewModel.runtimeActionInFlight,
                 contextUsage: chatViewModel.contextUsage(for: conversationListViewModel.selectedConversation),
                 selectedModel: settingsViewModel.settings.selectedModel,
                 onSend: chatViewModel.sendMessage,
@@ -29,6 +31,16 @@ struct ContentView: View {
                 onRefreshRuntimeStatus: {
                     Task {
                         await settingsViewModel.refreshRunningModels()
+                    }
+                },
+                onPrewarmModel: {
+                    Task {
+                        await settingsViewModel.prewarmSelectedModel()
+                    }
+                },
+                onUnloadModel: {
+                    Task {
+                        await settingsViewModel.unloadSelectedModel()
                     }
                 }
             )

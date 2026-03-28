@@ -38,6 +38,20 @@ actor OllamaClient {
         return decoded.models.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    func prewarmModel(baseURL: URL, model: String) async throws {
+        try await updateModelLifecycle(
+            baseURL: baseURL,
+            requestBody: OllamaGenerateLifecycleRequest(model: model, prompt: "", stream: false, keepAlive: .keepLoaded)
+        )
+    }
+
+    func unloadModel(baseURL: URL, model: String) async throws {
+        try await updateModelLifecycle(
+            baseURL: baseURL,
+            requestBody: OllamaGenerateLifecycleRequest(model: model, prompt: "", stream: false, keepAlive: .unloadNow)
+        )
+    }
+
     func streamChat(
         baseURL: URL,
         model: String,
@@ -151,6 +165,20 @@ actor OllamaClient {
             throw OllamaClientError.httpStatus(httpResponse.statusCode)
         }
     }
+
+    private func updateModelLifecycle(
+        baseURL: URL,
+        requestBody: OllamaGenerateLifecycleRequest
+    ) async throws {
+        let request = try makeRequest(
+            baseURL: baseURL,
+            path: "/api/generate",
+            method: "POST",
+            body: try JSONEncoder().encode(requestBody)
+        )
+        let (data, response) = try await urlSession.data(for: request)
+        try validate(response: response, data: data)
+    }
 }
 
 struct OllamaChatRequestMessage: Codable, Equatable {
@@ -160,6 +188,35 @@ struct OllamaChatRequestMessage: Codable, Equatable {
 
 private struct OllamaTagsResponse: Decodable {
     let models: [OllamaModelTag]
+}
+
+private struct OllamaGenerateLifecycleRequest: Codable {
+    enum KeepAliveValue: Codable {
+        case seconds(Int)
+
+        static let keepLoaded = KeepAliveValue.seconds(-1)
+        static let unloadNow = KeepAliveValue.seconds(0)
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch self {
+            case .seconds(let value):
+                try container.encode(value)
+            }
+        }
+    }
+
+    let model: String
+    let prompt: String
+    let stream: Bool
+    let keepAlive: KeepAliveValue
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case prompt
+        case stream
+        case keepAlive = "keep_alive"
+    }
 }
 
 private struct OllamaChatRequest: Codable {

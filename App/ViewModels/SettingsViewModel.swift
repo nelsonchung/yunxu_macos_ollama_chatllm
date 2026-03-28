@@ -7,6 +7,8 @@ final class SettingsViewModel: ObservableObject {
     @Published var runningModels: [OllamaRunningModel] = []
     @Published var connectionStatus: OllamaConnectionStatus = .unknown
     @Published var errorMessage: String?
+    @Published var runtimeStatusMessage: String?
+    @Published var runtimeActionInFlight = false
 
     private let store: SettingsStore
     private let ollamaClient: OllamaClient
@@ -83,5 +85,43 @@ final class SettingsViewModel: ObservableObject {
 
     func chooseModel(_ name: String) {
         settings.selectedModel = name
+    }
+
+    func prewarmSelectedModel() async {
+        guard let baseURL = settings.baseURL else {
+            errorMessage = "請先確認 Ollama Base URL。"
+            return
+        }
+
+        runtimeActionInFlight = true
+        runtimeStatusMessage = nil
+        defer { runtimeActionInFlight = false }
+
+        do {
+            try await ollamaClient.prewarmModel(baseURL: baseURL, model: settings.selectedModel)
+            await refreshRunningModels()
+            runtimeStatusMessage = "Prewarmed \(settings.selectedModel)"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func unloadSelectedModel() async {
+        guard let baseURL = settings.baseURL else {
+            errorMessage = "請先確認 Ollama Base URL。"
+            return
+        }
+
+        runtimeActionInFlight = true
+        runtimeStatusMessage = nil
+        defer { runtimeActionInFlight = false }
+
+        do {
+            try await ollamaClient.unloadModel(baseURL: baseURL, model: settings.selectedModel)
+            await refreshRunningModels()
+            runtimeStatusMessage = "Unloaded \(settings.selectedModel)"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }

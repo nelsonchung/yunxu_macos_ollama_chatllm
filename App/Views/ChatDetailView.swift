@@ -7,12 +7,16 @@ struct ChatDetailView: View {
     let errorMessage: String?
     let connectionStatus: OllamaConnectionStatus
     let runningModels: [OllamaRunningModel]
+    let runtimeStatusMessage: String?
+    let runtimeActionInFlight: Bool
     let contextUsage: ContextUsageSnapshot?
     let selectedModel: String
     let onSend: () -> Void
     let onStop: () -> Void
     let onRetryConnection: () -> Void
     let onRefreshRuntimeStatus: () -> Void
+    let onPrewarmModel: () -> Void
+    let onUnloadModel: () -> Void
     @State private var showsRuntimeDetails = false
 
     var body: some View {
@@ -86,8 +90,25 @@ struct ChatDetailView: View {
                 Label("Running Models", systemImage: "cpu")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
+                Button("Prewarm", action: onPrewarmModel)
+                    .buttonStyle(.link)
+                    .disabled(runtimeActionInFlight)
+                Button("Unload", action: onUnloadModel)
+                    .buttonStyle(.link)
+                    .disabled(runtimeActionInFlight)
                 Button("Refresh", action: onRefreshRuntimeStatus)
                     .buttonStyle(.link)
+                    .disabled(runtimeActionInFlight)
+            }
+
+            if let runtimeStatusMessage {
+                Text(runtimeStatusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if runtimeActionInFlight {
+                Text("Updating model runtime state...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if runningModels.isEmpty {
