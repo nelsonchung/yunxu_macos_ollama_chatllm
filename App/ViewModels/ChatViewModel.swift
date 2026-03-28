@@ -191,7 +191,7 @@ final class ChatViewModel: ObservableObject {
             .suffix(20)
 
         var requestMessages: [OllamaChatRequestMessage] = []
-        let systemPrompt = settingsViewModel.settings.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let systemPrompt = effectiveSystemPrompt()
         if !systemPrompt.isEmpty {
             requestMessages.append(OllamaChatRequestMessage(role: ChatRole.system.rawValue, content: systemPrompt))
         }
@@ -219,6 +219,13 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func presentableError(_ error: Error) -> String {
+        if case let OllamaClientError.firstTokenTimeout(seconds) = error {
+            if settingsViewModel.settings.supportsThinkingToggle {
+                return "模型在 \(seconds) 秒內沒有開始輸出內容。建議保留目前的 Quick Response Mode，或改用更小的模型。"
+            }
+            return "模型在 \(seconds) 秒內沒有開始輸出內容，建議降低 context window 或改用更小的模型。"
+        }
+
         let message = error.localizedDescription
         if message.contains("Could not connect") || message.contains("offline") {
             return "無法連線到本機 Ollama 服務，請確認服務是否已啟動。"
@@ -227,5 +234,22 @@ final class ChatViewModel: ObservableObject {
             return "找不到目前選擇的模型，請確認模型名稱是否正確。"
         }
         return message
+    }
+
+    private func effectiveSystemPrompt() -> String {
+        var components: [String] = []
+
+        if settingsViewModel.settings.disableThinkingForQwen,
+           settingsViewModel.settings.supportsThinkingToggle {
+            components.append("/no_think")
+        }
+
+        let systemPrompt = settingsViewModel.settings.systemPrompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !systemPrompt.isEmpty {
+            components.append(systemPrompt)
+        }
+
+        return components.joined(separator: "\n")
     }
 }

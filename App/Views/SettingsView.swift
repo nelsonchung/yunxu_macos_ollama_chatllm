@@ -38,6 +38,17 @@ struct SettingsView: View {
 
                 Toggle("Enable Streaming", isOn: $viewModel.settings.streamEnabled)
 
+                if viewModel.settings.supportsThinkingToggle {
+                    Toggle("Quick Response Mode for Qwen", isOn: $viewModel.settings.disableThinkingForQwen)
+                }
+
+                Stepper(
+                    "First Token Timeout: \(viewModel.settings.firstTokenTimeoutSeconds) sec",
+                    value: $viewModel.settings.firstTokenTimeoutSeconds,
+                    in: 10...120,
+                    step: 5
+                )
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text("System Prompt")
                     TextEditor(text: $viewModel.settings.systemPrompt)
@@ -53,6 +64,12 @@ struct SettingsView: View {
                 Text(errorMessage)
                     .font(.subheadline)
                     .foregroundStyle(.red)
+            }
+
+            if viewModel.settings.supportsThinkingToggle {
+                Text("Quick Response Mode 會對 Qwen3 類模型自動加入 /no_think，降低長時間思考或卡住的機率。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             HStack {

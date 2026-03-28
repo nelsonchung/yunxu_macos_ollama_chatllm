@@ -47,28 +47,58 @@ actor OllamaClient {
             body: try JSONEncoder().encode(payload)
         )
 
-        let (bytes, response) = try await urlSession.bytes(for: request)
-        try validate(response: response, data: nil)
+        let streamProgress = StreamProgress()
+        let streamTask = Task {
+            let (bytes, response) = try await urlSession.bytes(for: request)
+            try validate(response: response, data: nil)
 
-        for try await line in bytes.lines {
-            if Task.isCancelled {
-                throw CancellationError()
+            for try await line in bytes.lines {
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
+
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    continue
+                }
+
+                let chunkData = Data(trimmed.utf8)
+                let chunk = try JSONDecoder().decode(OllamaChatStreamChunk.self, from: chunkData)
+                if let content = chunk.message?.content, !content.isEmpty {
+                    await streamProgress.markReceivedFirstToken()
+                    onChunk(content)
+                }
+
+                if chunk.done {
+                    return
+                }
             }
+        }
 
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                continue
-            }
-
-            let chunkData = Data(trimmed.utf8)
-            let chunk = try JSONDecoder().decode(OllamaChatStreamChunk.self, from: chunkData)
-            if let content = chunk.message?.content, !content.isEmpty {
-                onChunk(content)
-            }
-
-            if chunk.done {
+        let watchdogTask = Task {
+            guard settings.firstTokenTimeoutSeconds > 0 else {
                 return
             }
+
+            try await Task.sleep(for: .seconds(settings.firstTokenTimeoutSeconds))
+            let hasReceivedToken = await streamProgress.hasReceivedFirstToken()
+            if !hasReceivedToken {
+                streamTask.cancel()
+            }
+        }
+
+        defer {
+            watchdogTask.cancel()
+        }
+
+        do {
+            try await streamTask.value
+        } catch is CancellationError {
+            let hasReceivedToken = await streamProgress.hasReceivedFirstToken()
+            if !hasReceivedToken {
+                throw OllamaClientError.firstTokenTimeout(settings.firstTokenTimeoutSeconds)
+            }
+            throw CancellationError()
         }
     }
 
@@ -150,6 +180,7 @@ enum OllamaClientError: LocalizedError {
     case invalidResponse
     case httpStatus(Int)
     case serverError(String)
+    case firstTokenTimeout(Int)
 
     var errorDescription: String? {
         switch self {
@@ -161,6 +192,20 @@ enum OllamaClientError: LocalizedError {
             return "The Ollama service returned HTTP \(code)."
         case .serverError(let message):
             return message
+        case .firstTokenTimeout(let seconds):
+            return "The model did not produce any output within \(seconds) seconds."
         }
+    }
+}
+
+private actor StreamProgress {
+    private var receivedFirstToken = false
+
+    func markReceivedFirstToken() {
+        receivedFirstToken = true
+    }
+
+    func hasReceivedFirstToken() -> Bool {
+        receivedFirstToken
     }
 }
