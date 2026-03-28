@@ -20,10 +20,16 @@ struct ContentView: View {
                 isGenerating: chatViewModel.isGenerating,
                 errorMessage: combinedErrorMessage,
                 connectionStatus: settingsViewModel.connectionStatus,
+                runningModels: settingsViewModel.runningModels,
                 selectedModel: settingsViewModel.settings.selectedModel,
                 onSend: chatViewModel.sendMessage,
                 onStop: chatViewModel.cancelGeneration,
-                onRetryConnection: chatViewModel.retryConnectionCheck
+                onRetryConnection: chatViewModel.retryConnectionCheck,
+                onRefreshRuntimeStatus: {
+                    Task {
+                        await settingsViewModel.refreshRunningModels()
+                    }
+                }
             )
         }
         .navigationSplitViewStyle(.balanced)

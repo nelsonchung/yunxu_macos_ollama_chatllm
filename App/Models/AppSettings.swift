@@ -29,6 +29,10 @@ struct AppSettings: Codable, Equatable {
         selectedModel.localizedCaseInsensitiveContains("qwen3")
     }
 
+    var usesThinkingAPI: Bool {
+        supportsThinkingToggle
+    }
+
     enum CodingKeys: String, CodingKey {
         case baseURLString
         case selectedModel

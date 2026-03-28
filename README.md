@@ -7,7 +7,9 @@ Native macOS SwiftUI chat app for local Ollama models.
 The app currently implements:
 
 - Ollama health/model discovery via `/api/tags`
+- Running-model status via `/api/ps`
 - Streaming chat via `/api/chat`
+- Reasoning/thinking trace rendering for Qwen3 when Quick Response Mode is off
 - Multi-conversation sidebar
 - Local conversation persistence in Application Support
 - Settings for base URL, model, system prompt, temperature, and context size

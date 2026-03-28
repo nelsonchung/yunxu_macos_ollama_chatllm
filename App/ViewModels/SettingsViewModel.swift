@@ -4,6 +4,7 @@ import Foundation
 final class SettingsViewModel: ObservableObject {
     @Published var settings: AppSettings = .default
     @Published var availableModels: [String] = []
+    @Published var runningModels: [OllamaRunningModel] = []
     @Published var connectionStatus: OllamaConnectionStatus = .unknown
     @Published var errorMessage: String?
 
@@ -42,8 +43,13 @@ final class SettingsViewModel: ObservableObject {
         errorMessage = nil
 
         do {
-            let tags = try await ollamaClient.fetchTags(baseURL: baseURL)
+            async let tagsTask = ollamaClient.fetchTags(baseURL: baseURL)
+            async let runningModelsTask = ollamaClient.fetchRunningModels(baseURL: baseURL)
+
+            let tags = try await tagsTask
+            let runningModels = (try? await runningModelsTask) ?? []
             availableModels = tags.map(\.name)
+            self.runningModels = runningModels
             connectionStatus = .connected
 
             if !availableModels.isEmpty, !availableModels.contains(settings.selectedModel) {
@@ -56,8 +62,22 @@ final class SettingsViewModel: ObservableObject {
             }
         } catch {
             availableModels = []
+            runningModels = []
             connectionStatus = .disconnected(error.localizedDescription)
             errorMessage = "無法連線到本機 Ollama 服務，請確認服務是否已啟動。"
+        }
+    }
+
+    func refreshRunningModels() async {
+        guard let baseURL = settings.baseURL else {
+            runningModels = []
+            return
+        }
+
+        do {
+            runningModels = try await ollamaClient.fetchRunningModels(baseURL: baseURL)
+        } catch {
+            runningModels = []
         }
     }
 

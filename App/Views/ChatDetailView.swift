@@ -6,10 +6,13 @@ struct ChatDetailView: View {
     let isGenerating: Bool
     let errorMessage: String?
     let connectionStatus: OllamaConnectionStatus
+    let runningModels: [OllamaRunningModel]
     let selectedModel: String
     let onSend: () -> Void
     let onStop: () -> Void
     let onRetryConnection: () -> Void
+    let onRefreshRuntimeStatus: () -> Void
+    @State private var showsRuntimeDetails = false
 
     var body: some View {
         Group {
@@ -50,6 +53,8 @@ struct ChatDetailView: View {
                 Spacer()
             }
 
+            runtimeStatusSection
+
             if let errorMessage {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -69,6 +74,48 @@ struct ChatDetailView: View {
             }
         }
         .padding(20)
+    }
+
+    private var runtimeStatusSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Running Models", systemImage: "cpu")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Refresh", action: onRefreshRuntimeStatus)
+                    .buttonStyle(.link)
+            }
+
+            if runningModels.isEmpty {
+                Text(connectionStatus == .connected ? "No models currently loaded in memory." : "Runtime status unavailable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                DisclosureGroup(isExpanded: $showsRuntimeDetails) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(runningModels) { model in
+                            RunningModelDetailRow(
+                                model: model,
+                                isSelected: model.name == selectedModel || model.model == selectedModel
+                            )
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(runningModels) { model in
+                            RunningModelSummaryRow(
+                                model: model,
+                                isSelected: model.name == selectedModel || model.model == selectedModel
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.primary.opacity(0.035))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private func messageList(for conversation: ChatConversation) -> some View {
@@ -108,6 +155,10 @@ struct ChatDetailView: View {
 private struct MessageBubbleView: View {
     let message: ChatMessage
 
+    private var resolvedDisplay: ChatMessageDisplay {
+        message.resolvedDisplay
+    }
+
     var body: some View {
         HStack {
             if message.role == .assistant {
@@ -133,9 +184,9 @@ private struct MessageBubbleView: View {
 
                 Spacer()
 
-                if !displayContent.isEmpty {
+                if let copyableText, !copyableText.isEmpty {
                     Button {
-                        Clipboard.copy(displayContent)
+                        Clipboard.copy(copyableText)
                     } label: {
                         Image(systemName: "doc.on.doc")
                     }
@@ -145,10 +196,23 @@ private struct MessageBubbleView: View {
                 }
             }
 
-            MessageContentView(
-                content: displayContent,
-                isStreaming: message.status == .streaming
-            )
+            if let thinkingContent, !thinkingContent.isEmpty {
+                ThoughtSectionView(
+                    content: thinkingContent,
+                    isStreaming: message.status == .streaming && answerContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+
+            if !displayContent.isEmpty {
+                MessageContentView(
+                    content: displayContent,
+                    isStreaming: message.status == .streaming
+                )
+            } else if message.status == .streaming, thinkingContent != nil {
+                Label("Generating final answer...", systemImage: "ellipsis.bubble")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
 
             if message.status == .streaming {
                 ProgressView()
@@ -173,11 +237,31 @@ private struct MessageBubbleView: View {
     }
 
     private var displayContent: String {
-        let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = answerContent.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty && message.status == .streaming {
-            return "Thinking..."
+            return thinkingContent == nil ? "Thinking..." : ""
         }
-        return message.content
+        return answerContent
+    }
+
+    private var answerContent: String {
+        resolvedDisplay.answer
+    }
+
+    private var thinkingContent: String? {
+        let trimmed = resolvedDisplay.thinking?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            return resolvedDisplay.thinking
+        }
+        return nil
+    }
+
+    private var copyableText: String? {
+        let answer = answerContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !answer.isEmpty {
+            return answerContent
+        }
+        return thinkingContent
     }
 
     private var backgroundColor: Color {
@@ -189,6 +273,116 @@ private struct MessageBubbleView: View {
         case .system:
             return Color.gray.opacity(0.12)
         }
+    }
+}
+
+private struct RunningModelSummaryRow: View {
+    let model: OllamaRunningModel
+    let isSelected: Bool
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(model.name)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isSelected ? Color.accentColor : .primary)
+                .lineLimit(1)
+
+            Text("·")
+                .foregroundStyle(.tertiary)
+
+            Text(model.processorLabel)
+                .foregroundStyle(.secondary)
+
+            Text("·")
+                .foregroundStyle(.tertiary)
+
+            Text("ctx \(model.contextLength)")
+                .foregroundStyle(.secondary)
+
+            Text("·")
+                .foregroundStyle(.tertiary)
+
+            Text("VRAM \(model.vramLabel)")
+                .foregroundStyle(.secondary)
+
+            Text("·")
+                .foregroundStyle(.tertiary)
+
+            Text(expirationLabel)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 0)
+        }
+        .font(.caption)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(isSelected ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.04))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.06))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var expirationLabel: String {
+        "until \(Self.relativeFormatter.localizedString(for: model.expiresAt, relativeTo: .now))"
+    }
+}
+
+private struct RunningModelDetailRow: View {
+    let model: OllamaRunningModel
+    let isSelected: Bool
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(model.name)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isSelected ? Color.accentColor : .primary)
+
+            if !model.summaryLabel.isEmpty {
+                Text(model.summaryLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+
+            Text(model.processorLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("ctx \(model.contextLength)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("size \(model.sizeLabel)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("VRAM \(model.vramLabel)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("unloads \(Self.relativeFormatter.localizedString(for: model.expiresAt, relativeTo: .now))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.025))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -264,6 +458,35 @@ private struct MessageContentView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+private struct ThoughtSectionView: View {
+    let content: String
+    let isStreaming: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Thinking", systemImage: "brain")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    Clipboard.copy(content)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Copy thinking trace")
+            }
+
+            MessageContentView(content: content, isStreaming: isStreaming)
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.09))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

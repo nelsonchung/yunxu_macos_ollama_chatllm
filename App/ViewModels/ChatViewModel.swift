@@ -11,6 +11,7 @@ final class ChatViewModel: ObservableObject {
     private unowned let conversationsViewModel: ConversationListViewModel
     private unowned let settingsViewModel: SettingsViewModel
     private var streamTask: Task<Void, Never>?
+    private var streamParsers: [UUID: ThinkTagStreamParser] = [:]
     private var hasBootstrapped = false
 
     init(
@@ -74,9 +75,13 @@ final class ChatViewModel: ObservableObject {
         conversationsViewModel.updateConversation(updatedConversation)
         draftText = ""
         isGenerating = true
+        Task {
+            await settingsViewModel.refreshRunningModels()
+        }
 
         let conversationID = updatedConversation.id
         let assistantMessageID = assistantMessage.id
+        streamParsers[assistantMessageID] = ThinkTagStreamParser()
         let requestMessages = buildRequestMessages(from: updatedConversation)
         let selectedModel = settingsViewModel.settings.selectedModel
         let settingsSnapshot = settingsViewModel.settings
@@ -92,9 +97,9 @@ final class ChatViewModel: ObservableObject {
                     model: selectedModel,
                     messages: requestMessages,
                     settings: settingsSnapshot
-                ) { chunk in
+                ) { delta in
                     Task { @MainActor [weak self] in
-                        self?.appendChunk(chunk, conversationID: conversationID, assistantMessageID: assistantMessageID)
+                        self?.appendChunk(delta, conversationID: conversationID, assistantMessageID: assistantMessageID)
                     }
                 }
 
@@ -120,6 +125,9 @@ final class ChatViewModel: ObservableObject {
 
             self.isGenerating = false
             self.streamTask = nil
+            Task {
+                await self.settingsViewModel.refreshRunningModels()
+            }
         }
     }
 
@@ -140,7 +148,11 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func appendChunk(_ chunk: String, conversationID: UUID, assistantMessageID: UUID) {
+    private func appendChunk(
+        _ delta: OllamaChatChunkDelta,
+        conversationID: UUID,
+        assistantMessageID: UUID
+    ) {
         guard var conversation = conversationsViewModel.conversation(for: conversationID) else {
             return
         }
@@ -149,7 +161,31 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        conversation.messages[index].content += chunk
+        if let thinking = delta.thinking {
+            let existingThinking = conversation.messages[index].thinking ?? ""
+            conversation.messages[index].thinking = existingThinking + thinking
+        }
+
+        if let content = delta.content {
+            let sanitizedContent = sanitizeThinkBoundary(
+                content,
+                existingThinking: conversation.messages[index].thinking
+            )
+
+            var parser = streamParsers[assistantMessageID] ?? ThinkTagStreamParser()
+            let parsed = parser.consume(sanitizedContent)
+            streamParsers[assistantMessageID] = parser
+
+            if !parsed.thinking.isEmpty {
+                let existingThinking = conversation.messages[index].thinking ?? ""
+                conversation.messages[index].thinking = existingThinking + parsed.thinking
+            }
+
+            if !parsed.content.isEmpty {
+                conversation.messages[index].content += parsed.content
+            }
+        }
+
         conversation.updatedAt = .now
         conversationsViewModel.updateConversation(conversation)
     }
@@ -167,8 +203,23 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
+        if var parser = streamParsers.removeValue(forKey: assistantMessageID) {
+            let trailing = parser.finish()
+            if !trailing.thinking.isEmpty {
+                let existingThinking = conversation.messages[index].thinking ?? ""
+                conversation.messages[index].thinking = existingThinking + trailing.thinking
+            }
+            if !trailing.content.isEmpty {
+                conversation.messages[index].content += trailing.content
+            }
+        }
+
         conversation.messages[index].status = status
         conversation.messages[index].completedAt = .now
+
+        let normalized = conversation.messages[index].resolvedDisplay
+        conversation.messages[index].content = normalized.answer
+        conversation.messages[index].thinking = normalized.thinking
 
         if conversation.messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             switch status {
@@ -187,7 +238,10 @@ final class ChatViewModel: ObservableObject {
 
     private func buildRequestMessages(from conversation: ChatConversation) -> [OllamaChatRequestMessage] {
         let visibleMessages = conversation.messages
-            .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter {
+                let answer = $0.resolvedDisplay.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !answer.isEmpty
+            }
             .suffix(20)
 
         var requestMessages: [OllamaChatRequestMessage] = []
@@ -198,7 +252,7 @@ final class ChatViewModel: ObservableObject {
 
         requestMessages.append(
             contentsOf: visibleMessages.map {
-                OllamaChatRequestMessage(role: $0.role.rawValue, content: $0.content)
+                OllamaChatRequestMessage(role: $0.role.rawValue, content: $0.resolvedDisplay.answer)
             }
         )
 
@@ -221,7 +275,7 @@ final class ChatViewModel: ObservableObject {
     private func presentableError(_ error: Error) -> String {
         if case let OllamaClientError.firstTokenTimeout(seconds) = error {
             if settingsViewModel.settings.supportsThinkingToggle {
-                return "模型在 \(seconds) 秒內沒有開始輸出內容。建議保留目前的 Quick Response Mode，或改用更小的模型。"
+                return "模型在 \(seconds) 秒內沒有開始輸出內容。若你要保留 reasoning trace，建議把 First Token Timeout 調高；若只想更快回覆，可開啟 Quick Response Mode。"
             }
             return "模型在 \(seconds) 秒內沒有開始輸出內容，建議降低 context window 或改用更小的模型。"
         }
@@ -237,19 +291,32 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func effectiveSystemPrompt() -> String {
-        var components: [String] = []
-
-        if settingsViewModel.settings.disableThinkingForQwen,
-           settingsViewModel.settings.supportsThinkingToggle {
-            components.append("/no_think")
-        }
-
-        let systemPrompt = settingsViewModel.settings.systemPrompt
+        settingsViewModel.settings.systemPrompt
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !systemPrompt.isEmpty {
-            components.append(systemPrompt)
+    }
+
+    private func sanitizeThinkBoundary(_ content: String, existingThinking: String?) -> String {
+        guard existingThinking?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            return content
         }
 
-        return components.joined(separator: "\n")
+        var sanitized = content
+        let patterns = ["</think>", "<think>"]
+        for pattern in patterns {
+            while true {
+                let trimmed = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard trimmed.hasPrefix(pattern) else {
+                    break
+                }
+
+                if let range = sanitized.range(of: pattern) {
+                    sanitized.removeSubrange(range)
+                } else {
+                    break
+                }
+            }
+        }
+
+        return sanitized
     }
 }

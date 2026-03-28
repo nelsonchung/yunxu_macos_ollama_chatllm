@@ -23,17 +23,33 @@ actor OllamaClient {
         return decoded.models.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    func fetchRunningModels(baseURL: URL) async throws -> [OllamaRunningModel] {
+        let request = try makeRequest(
+            baseURL: baseURL,
+            path: "/api/ps",
+            method: "GET"
+        )
+        let (data, response) = try await urlSession.data(for: request)
+        try validate(response: response, data: data)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .customISO8601WithFractionalSeconds
+        let decoded = try decoder.decode(OllamaRunningModelsResponse.self, from: data)
+        return decoded.models.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     func streamChat(
         baseURL: URL,
         model: String,
         messages: [OllamaChatRequestMessage],
         settings: AppSettings,
-        onChunk: @escaping @Sendable (String) -> Void
+        onChunk: @escaping @Sendable (OllamaChatChunkDelta) -> Void
     ) async throws {
         let payload = OllamaChatRequest(
             model: model,
             messages: messages,
             stream: settings.streamEnabled,
+            think: settings.usesThinkingAPI ? !settings.disableThinkingForQwen : nil,
             options: OllamaChatOptions(
                 temperature: settings.temperature,
                 numCtx: settings.numCtx
@@ -64,9 +80,11 @@ actor OllamaClient {
 
                 let chunkData = Data(trimmed.utf8)
                 let chunk = try JSONDecoder().decode(OllamaChatStreamChunk.self, from: chunkData)
-                if let content = chunk.message?.content, !content.isEmpty {
+                let content = chunk.message?.content?.nilIfEmpty
+                let thinking = chunk.message?.thinking?.nilIfEmpty
+                if content != nil || thinking != nil {
                     await streamProgress.markReceivedFirstToken()
-                    onChunk(content)
+                    onChunk(OllamaChatChunkDelta(content: content, thinking: thinking))
                 }
 
                 if chunk.done {
@@ -148,6 +166,7 @@ private struct OllamaChatRequest: Codable {
     let model: String
     let messages: [OllamaChatRequestMessage]
     let stream: Bool
+    let think: Bool?
     let options: OllamaChatOptions
 }
 
@@ -169,6 +188,12 @@ private struct OllamaChatStreamChunk: Decodable {
 private struct OllamaChunkMessage: Decodable {
     let role: String?
     let content: String?
+    let thinking: String?
+}
+
+struct OllamaChatChunkDelta {
+    let content: String?
+    let thinking: String?
 }
 
 private struct OllamaErrorResponse: Decodable {
@@ -207,5 +232,34 @@ private actor StreamProgress {
 
     func hasReceivedFirstToken() -> Bool {
         receivedFirstToken
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
+private extension JSONDecoder.DateDecodingStrategy {
+    static let customISO8601WithFractionalSeconds = custom { decoder in
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let standardFormatter = ISO8601DateFormatter()
+        standardFormatter.formatOptions = [.withInternetDateTime]
+
+        if let date = fractionalFormatter.date(from: value)
+            ?? standardFormatter.date(from: value) {
+            return date
+        }
+
+        throw DecodingError.dataCorruptedError(
+            in: container,
+            debugDescription: "Invalid ISO8601 date: \(value)"
+        )
     }
 }

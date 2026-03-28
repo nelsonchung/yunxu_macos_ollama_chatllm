@@ -39,7 +39,7 @@ struct SettingsView: View {
                 Toggle("Enable Streaming", isOn: $viewModel.settings.streamEnabled)
 
                 if viewModel.settings.supportsThinkingToggle {
-                    Toggle("Quick Response Mode for Qwen", isOn: $viewModel.settings.disableThinkingForQwen)
+                    Toggle("Quick Response Mode (Hide Thinking)", isOn: $viewModel.settings.disableThinkingForQwen)
                 }
 
                 Stepper(
@@ -67,7 +67,7 @@ struct SettingsView: View {
             }
 
             if viewModel.settings.supportsThinkingToggle {
-                Text("Quick Response Mode 會對 Qwen3 類模型自動加入 /no_think，降低長時間思考或卡住的機率。")
+                Text("關閉 Quick Response Mode 後，app 會使用 Ollama 的 thinking stream，把 Qwen3 的 reasoning trace 與最終答案分開呈現。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
