@@ -21,6 +21,7 @@ struct ContentView: View {
                 errorMessage: combinedErrorMessage,
                 connectionStatus: settingsViewModel.connectionStatus,
                 runningModels: settingsViewModel.runningModels,
+                contextUsage: chatViewModel.contextUsage(for: conversationListViewModel.selectedConversation),
                 selectedModel: settingsViewModel.settings.selectedModel,
                 onSend: chatViewModel.sendMessage,
                 onStop: chatViewModel.cancelGeneration,

@@ -7,6 +7,7 @@ struct ChatDetailView: View {
     let errorMessage: String?
     let connectionStatus: OllamaConnectionStatus
     let runningModels: [OllamaRunningModel]
+    let contextUsage: ContextUsageSnapshot?
     let selectedModel: String
     let onSend: () -> Void
     let onStop: () -> Void
@@ -49,6 +50,9 @@ struct ChatDetailView: View {
                     Text("Model: \(conversation.modelName)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    if let contextUsage {
+                        ContextUsageView(snapshot: contextUsage)
+                    }
                 }
                 Spacer()
             }
@@ -148,6 +152,81 @@ struct ChatDetailView: View {
             withAnimation(.easeOut(duration: 0.2)) {
                 proxy.scrollTo(lastID, anchor: .bottom)
             }
+        }
+    }
+}
+
+private struct ContextUsageView: View {
+    let snapshot: ContextUsageSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("Context", systemImage: "text.quote")
+                    .foregroundStyle(.secondary)
+
+                Text("\(snapshot.messageCount) msgs")
+                    .foregroundStyle(.secondary)
+
+                Text("·")
+                    .foregroundStyle(.tertiary)
+
+                Text("\(snapshot.characterCount.formatted()) chars")
+                    .foregroundStyle(.secondary)
+
+                Text("·")
+                    .foregroundStyle(.tertiary)
+
+                Text("est. \(snapshot.estimatedTokenCount) / \(snapshot.contextWindow) tok")
+                    .foregroundStyle(contextColor)
+
+                Text("·")
+                    .foregroundStyle(.tertiary)
+
+                Text("left ~\(snapshot.remainingTokenEstimate)")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.primary.opacity(0.08))
+
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: barColors,
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(8, geometry.size.width * snapshot.utilizationRatio))
+                }
+            }
+            .frame(height: 6)
+        }
+    }
+
+    private var contextColor: Color {
+        switch snapshot.utilizationRatio {
+        case 0.8...:
+            return .orange
+        case 0.6...:
+            return .yellow
+        default:
+            return .secondary
+        }
+    }
+
+    private var barColors: [Color] {
+        switch snapshot.utilizationRatio {
+        case 0.8...:
+            return [Color.orange.opacity(0.8), Color.red.opacity(0.85)]
+        case 0.6...:
+            return [Color.yellow.opacity(0.85), Color.orange.opacity(0.8)]
+        default:
+            return [Color.blue.opacity(0.65), Color.green.opacity(0.75)]
         }
     }
 }

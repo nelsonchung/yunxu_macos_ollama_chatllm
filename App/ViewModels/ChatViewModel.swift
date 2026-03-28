@@ -148,6 +148,25 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    func contextUsage(for conversation: ChatConversation?) -> ContextUsageSnapshot? {
+        guard let conversation else {
+            return nil
+        }
+
+        let requestMessages = buildRequestMessages(from: conversation)
+        let characterCount = requestMessages.reduce(0) { $0 + $1.content.count }
+        let estimatedTokenCount = requestMessages.reduce(0) { partialResult, message in
+            partialResult + estimateTokenCount(for: message.content)
+        }
+
+        return ContextUsageSnapshot(
+            messageCount: requestMessages.count,
+            characterCount: characterCount,
+            estimatedTokenCount: estimatedTokenCount,
+            contextWindow: settingsViewModel.settings.numCtx
+        )
+    }
+
     private func appendChunk(
         _ delta: OllamaChatChunkDelta,
         conversationID: UUID,
@@ -318,5 +337,42 @@ final class ChatViewModel: ObservableObject {
         }
 
         return sanitized
+    }
+
+    private func estimateTokenCount(for text: String) -> Int {
+        var asciiLikeScalarCount = 0
+        var tokenCount = 0
+
+        for scalar in text.unicodeScalars {
+            if scalar.properties.isWhitespace {
+                continue
+            }
+
+            if scalar.isCJKLike {
+                tokenCount += 1
+            } else {
+                asciiLikeScalarCount += 1
+            }
+        }
+
+        tokenCount += Int(ceil(Double(asciiLikeScalarCount) / 4.0))
+        return max(tokenCount, 1)
+    }
+}
+
+private extension Unicode.Scalar {
+    var isCJKLike: Bool {
+        switch value {
+        case 0x3400...0x4DBF,
+             0x4E00...0x9FFF,
+             0xF900...0xFAFF,
+             0x3040...0x309F,
+             0x30A0...0x30FF,
+             0xAC00...0xD7AF,
+             0xFF00...0xFFEF:
+            return true
+        default:
+            return false
+        }
     }
 }

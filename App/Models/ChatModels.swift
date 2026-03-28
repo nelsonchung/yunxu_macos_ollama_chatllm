@@ -184,6 +184,24 @@ struct OllamaRunningModelDetails: Decodable, Equatable {
     }
 }
 
+struct ContextUsageSnapshot: Equatable {
+    let messageCount: Int
+    let characterCount: Int
+    let estimatedTokenCount: Int
+    let contextWindow: Int
+
+    var utilizationRatio: Double {
+        guard contextWindow > 0 else {
+            return 0
+        }
+        return min(Double(estimatedTokenCount) / Double(contextWindow), 1)
+    }
+
+    var remainingTokenEstimate: Int {
+        max(contextWindow - estimatedTokenCount, 0)
+    }
+}
+
 struct ChatMessageDisplay: Equatable {
     let answer: String
     let thinking: String?
