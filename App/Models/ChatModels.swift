@@ -18,6 +18,7 @@ struct ChatMessage: Identifiable, Codable, Equatable {
     var role: ChatRole
     var content: String
     var createdAt: Date
+    var completedAt: Date?
     var status: ChatMessageStatus
 
     init(
@@ -25,13 +26,23 @@ struct ChatMessage: Identifiable, Codable, Equatable {
         role: ChatRole,
         content: String,
         createdAt: Date = .now,
+        completedAt: Date? = nil,
         status: ChatMessageStatus = .complete
     ) {
         self.id = id
         self.role = role
         self.content = content
         self.createdAt = createdAt
+        self.completedAt = completedAt
         self.status = status
+    }
+
+    var responseDuration: TimeInterval? {
+        guard role == .assistant, let completedAt else {
+            return nil
+        }
+
+        return completedAt.timeIntervalSince(createdAt)
     }
 }
 

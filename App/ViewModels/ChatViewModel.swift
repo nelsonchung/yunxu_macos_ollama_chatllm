@@ -168,6 +168,7 @@ final class ChatViewModel: ObservableObject {
         }
 
         conversation.messages[index].status = status
+        conversation.messages[index].completedAt = .now
 
         if conversation.messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             switch status {

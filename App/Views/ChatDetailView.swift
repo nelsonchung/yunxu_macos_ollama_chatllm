@@ -122,13 +122,33 @@ private struct MessageBubbleView: View {
 
     private var bubble: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-            Text(displayContent)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                    MessageTimingView(message: message)
+                }
+
+                Spacer()
+
+                if !displayContent.isEmpty {
+                    Button {
+                        Clipboard.copy(displayContent)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Copy message")
+                }
+            }
+
+            MessageContentView(
+                content: displayContent,
+                isStreaming: message.status == .streaming
+            )
 
             if message.status == .streaming {
                 ProgressView()
@@ -169,5 +189,132 @@ private struct MessageBubbleView: View {
         case .system:
             return Color.gray.opacity(0.12)
         }
+    }
+}
+
+private struct MessageTimingView: View {
+    let message: ChatMessage
+
+    var body: some View {
+        TimelineView(.periodic(from: message.createdAt, by: 0.5)) { context in
+            Text(metadataText(now: context.date))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func metadataText(now: Date) -> String {
+        var parts = [message.createdAt.formatted(date: .omitted, time: .standard)]
+
+        if let duration = duration(now: now) {
+            parts.append(durationText(duration))
+        }
+
+        return parts.joined(separator: " · ")
+    }
+
+    private func duration(now: Date) -> TimeInterval? {
+        guard message.role == .assistant else {
+            return nil
+        }
+
+        if let completedAt = message.completedAt {
+            return completedAt.timeIntervalSince(message.createdAt)
+        }
+
+        if message.status == .streaming {
+            return now.timeIntervalSince(message.createdAt)
+        }
+
+        return nil
+    }
+
+    private func durationText(_ duration: TimeInterval) -> String {
+        if duration < 1 {
+            return "\(Int(duration * 1000)) ms"
+        }
+
+        return String(format: "%.1f s", duration)
+    }
+}
+
+private struct MessageContentView: View {
+    let content: String
+    let isStreaming: Bool
+
+    private var segments: [MarkdownSegment] {
+        MarkdownRenderer.segments(from: content)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .prose(let attributed):
+                    Text(attributed)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case .codeBlock(let language, let code):
+                    CodeBlockView(language: language, code: code)
+                }
+            }
+
+            if isStreaming && content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("Thinking...")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct CodeBlockView: View {
+    let language: String?
+    let code: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(languageLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button {
+                    Clipboard.copy(code)
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.primary.opacity(0.04))
+
+            ScrollView(.horizontal, showsIndicators: true) {
+                Text(code)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .background(Color.black.opacity(0.08))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.primary.opacity(0.08))
+        }
+    }
+
+    private var languageLabel: String {
+        if let language, !language.isEmpty {
+            return language
+        }
+
+        return "code"
     }
 }
